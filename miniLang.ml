@@ -1,20 +1,68 @@
-(* TODO: Write a good set of tests for unused_vars. *)
-let unused_vars_tests = [
-  (* An example test case.
-     Note that you are *only* required to write tests for Rec, Fn, and Apply!
+(************************************************* define mini lang ********************************************)
+(* define Types *)
+type tp =
+  | Arrow of tp list * tp   (* function type: S1 S2 ... Sn -> T *)
+  | Int
+  | Bool
+
+(* Used for variables, aka "identifiers" *)
+type name = string
+
+(* define the primitive operations *)
+type primop = Equals | LessThan | Plus | Minus | Times | Negate
+
+(* define Expressions *)
+type exp =
+  | I of int                          (* 0 | 1 | 2 | ... *)
+  | B of bool                         (* true | false *)
+  | If of exp * exp * exp             (* if e then e1 else e2 *)
+  | Primop of primop * exp list       (* e1 <op> e2  or <op> e *)
+  | Fn of ((name * tp) list * exp)    (* fn (x_1: t_1, ..., x_n: t_n) => e *)
+  | Rec of (name * tp * exp)          (* rec (f: t) => e *)
+  | Let of (name * exp * exp)         (* let x = e1 in e2 end *)
+  | Apply of exp * (exp list)         (* e (e_1, e_2, ..., e_n) *)
+  | Var of name                       (* x *)
+
+
+
+(************************************************** unused vars ************************************************)
+
+
+(* delete *)
+let rec delete xs l =
+  List.filter (fun x -> not (List.mem x xs)) l (* Deletes every occurence of the elements of xs from l.*)
+
+(* free_variables *)
+      (* free_variables e = list of names occurring free in e
+       Invariant: every name occurs at most once. *)
+let rec free_variables = 
+  let union l1 l2 =
+    let l1' = List.filter (fun x -> not (List.mem x l2)) l1 in
+    l1' @ l2
+    (* Taking unions of lists.  If the lists are in fact sets (all elements are unique), then the result will also be a set.
   *)
-  (Let ("x", I 1, I 5), ["x"]);
-  (Rec ("x", Int, Var "x"), []);
-  (Rec ("x", Int, Fn ([("x", Int)],Var "x"))
-  , ["x"]);
-  (Fn ([("x", Int);("y", Int)],Var "x"), ["y"]);
-  (Fn ([("x", Int)],Var "x"), []);
-  (Apply ( Fn ([("x", Int);("y", Int)], Primop(Plus, [Var "x"; Var"y"]))
-         , [I 1; I 3]), [])
+  in
+  let union_fvs es =
+    List.fold_left (fun acc exp -> union acc (free_variables exp)) [] es
+  in
+  function
+  | Var y -> [y]
+  | I _ | B _ -> []
+  | If(e, e1, e2) -> union_fvs [e; e1; e2]
+  | Primop (po, args) -> union_fvs args
+  | Fn (xs, e) ->
+      let xs = List.map fst xs in
+      delete xs (free_variables e)
+  | Rec (x, t, e) ->
+      delete [x] (free_variables e)
+  | Let (x, e1, e2) ->
+      let e1_vars = free_variables e1 in
+      let e2_vars = delete [x] (free_variables e2) in
+      union e1_vars e2_vars
+  | Apply (e, es) -> union_fvs (e :: es)
 
-]
 
-(* TODO: Implement the missing cases of unused_vars. *)
+(* unused vars*)
 let rec unused_vars =
   function
   | Var _ | I _ | B _ -> []
@@ -45,61 +93,9 @@ let rec unused_vars =
       
       
       
-(* TODO: Write a good set of tests for subst. *)
-(* Note: we've added a type annotation here so that the compiler can help
-   you write tests of the correct form. *)
-let subst_tests : (((exp * name) * exp) * exp) list = [
-  (* An example test case. If you have trouble writing test cases of the
-     proper form, you can try copying this one and modifying it.
-     Note that you are *only* required to write tests for Rec, Fn, and Apply!
-  *)
-  (((I 1, "x"), (* [1/x] *)
-    (* let y = 2 in y + x *)
-    Let ("y", I 2, Primop (Plus, [Var "y"; Var "x"]))),
-   (* let y = 2 in y + 1 *)
-   Let ("y", I 2, Primop (Plus, [Var "y"; I 1])));
-  
-  
-  
-  (********REC*)
-  (((I 1, "x"), (* [1/x] *) 
-    Rec ("x", Int, Var "x")),
-   Rec ("x", Int, Var "x")); 
-  
-  (((I 1, "x"), (* [1/x] *) 
-    Rec ("y", Int, Var "x")),
-   Rec ("y", Int, I 1));
-  
-  (((Var "x", "y"), (* [x/y] *) 
-    Rec ("x", Int, Primop (Plus, [Var "x"; Var "y"]))),
-   Rec ("x'", Int, Primop (Plus, [Var "x'"; Var "x"])));
-  
-  (*********FN*)
-  (((I 1, "x"), (* [1/x] *) 
-    (Fn ([("x", Int)],Var "x"))),
-   (Fn ([("x", Int)],Var "x")));
-  
-  
-  (((I 1, "y"),  
-    (Fn ([("x", Int)], Primop(Plus, [Var "x"; Var"y"])))),
-   (Fn ([("x", Int)], Primop(Plus, [Var "x"; I 1]))));
-  
-  (((Var "x", "y"), (* [x/y] *) 
-    (Fn ([("x", Int)], Primop(Plus, [Var "x"; Var"y"])))),
-   (Fn ([("x'", Int)], Primop(Plus, [Var "x'"; Var"x"]))));
-  
-  (**********App*)
-  (((I 1, "x"), (* [1/x] *) 
-    Apply (Var"x", [Var"x";Var"y";Var"z"])),
-   Apply (I 1, [I 1;Var"y";Var"z"])); 
+(************************************************** subst ************************************************)
+type subst = exp * name
 
-  (((Var "x", "y"), 
-    Apply (Var"x", [Var"x";Var"y";Var"z"])),
-   Apply (Var "x", [Var "x" ;Var"x";Var"z"]))
-
-]
-
-(* TODO: Implement the missing cases of subst. *)
 let rec subst ((e', x) as s) exp =
   match exp with
   | Var y ->
@@ -179,32 +175,29 @@ let subst_list subs exp =
   List.fold_left (fun exp sub -> subst sub exp) exp subs
 
 
-(* TODO: Write a good set of tests for eval. *)
-let eval_tests = [
-  (* An example test case.
-     Note that you are *only* required to write tests for Rec and Apply!
-  *)
-  (Let ("x", I 1, Primop (Plus, [Var "x"; I 5])), I 6);
-  (Rec ("x", Int, (Let ("x", I 1, Var"x"))), I 1); 
-  
-  (Apply (Fn ([("x",Int)], Primop (Plus, [Var "x"; I 1])), [I 1]), (I 2));
-  
-  (Apply (Fn ([("x",Int); ("y", Int)], Primop (Plus, [Var "x"; Var "y"])), [I 1; I 2]), (I 3));
+(************************************************** eval ************************************************)
+(* Runtime errors that may be raised by eval. *)
+type runtime_error =
+  | Free_variable of name
+  | Bad_primop_args
+  | If_non_true_false
+  | Arity_mismatch
+  | Apply_non_fn
+exception Stuck of runtime_error
 
-  (Apply ((Fn ([], (I 1))),[]), (I 1)) ;  
-    
-  ((( Apply(
-       Rec("r", 
-           Arrow ([Int;Int],Int), 
-           (Fn ([("x", Int);("y",Int)], 
-                If ((Primop (LessThan, [Var"x"; I 5]),
-                     (Apply(Var "r", [(Primop (Plus,[Var "x"; I 1]));Var "y"])),
-                     (Var"y")))
-               ))),
-       [I 3; I 5]))), I 5)
-]
-
-(* TODO: Implement the missing cases of eval. *)
+(* Evaluates a primitive operation *)
+let eval_op op exps =
+  match op, exps with
+  | (Equals,   [I i; I i']) -> Some (B (i = i'))
+  | (LessThan, [I i; I i']) -> Some (B (i < i'))
+  | (Plus,     [I i; I i']) -> Some (I (i + i'))
+  | (Minus,    [I i; I i']) -> Some (I (i - i'))
+  | (Times,    [I i; I i']) -> Some (I (i * i'))
+  | (Negate,   [I i])       -> Some (I (-i))
+  | _                       -> None
+  
+  
+(* eval *)
 let rec eval exp =
   match exp with
   (* Values evaluate to themselves *)
@@ -253,40 +246,57 @@ let rec eval exp =
               
       |_ -> raise (Stuck Apply_non_fn)
               
+(************************************************** infer ************************************************)
+(* Type contexts *)
+type context = (name * tp) list
+let empty = []
 
-(* TODO: Write a good set of tests for infer. *)
-let infer_tests = [
-  (* An example test case.
-     Note that you are *only* required to write tests for Rec, Fn, and Apply!
-  *)
-  (([("x", Int)], Var "x"), Int);
-  
-  (([], (Fn([("x", Int);("y", Int)], Primop(Plus,[Var"x";Var"y"])))), Arrow ([Int;Int],Int));
-  
-  (([], (Fn([], I 3))), Arrow ([],Int));
-  
-  (([], (Fn([("x",Int)], Var"x"))), Arrow ([Int],Int));
 
-  (([], Apply ((Fn([("x", Int)], Var"x")),[I 3])), Int);
+(* Looks up the topmost x in ctx and returns its corresponding type.
+   If the variable x cannot be located in ctx, raises Not_found.
+*)
+let lookup (x: name) (ctx: context) = List.assoc x ctx
 
-  
-  (([("x", Int)], (Apply ((Fn([("x", Int);("y", Int)], 
-                              Primop(Plus,[Var"x";Var"y"]))),[Var"x";I 3]))), Int);
-  
-  (([], Apply ((Fn([], I 3)),[])), Int);
-  
-  (([], (Rec("r", 
-             Arrow ([Int;Int],Int), 
-             (Fn ([("x", Int);("y",Int)], 
-                  If ((Primop (LessThan, [Var"x"; I 5]),
-                       (Apply(Var "r", [(Primop (Plus,[Var "x"; I 1]));Var "y"])),
-                       (Var"y")))
-                 ))))), Arrow([Int;Int],Int))
-  
 
-]
+(* Adds a new type ascription to a context. *)
+let extend ctx (x, tau) = (x, tau) :: ctx
+(* Adds multiple new type ascriptions to a context. *)
+let extend_list (ctx: context) (l: (name * tp) list) =
+  List.fold_left extend ctx l
 
-(* TODO: Implement the missing cases of infer. *)
+
+
+(* Type errors that may be raised by infer *)
+type type_error =
+  | Free_variable of name
+  | Apply_non_arrow of tp (* expected an arrow type, but instead found... *)
+  | Arity_mismatch
+  | Type_mismatch of tp * tp (* (expected type, actual type) *)
+
+exception TypeError of type_error
+
+
+
+(* Convenience function for raising type mismatch errors *)
+let type_mismatch expected_type inferred_type =
+  raise (TypeError (Type_mismatch (expected_type, inferred_type)))
+
+
+(* Computes the type of a primitive operation.
+   The result is a tuple representing the domain and range of the primop.
+ *)
+let primopType (p: primop): tp list * tp = match p with
+  | Equals   -> ([Int; Int], Bool)
+  | LessThan -> ([Int; Int], Bool)
+  | Plus     -> ([Int; Int], Int)
+  | Minus    -> ([Int; Int], Int)
+  | Times    -> ([Int; Int], Int)
+  | Negate   -> ([Int], Int)
+;;
+
+
+
+(* infer *)
 let rec infer ctx e =
   match e with
   | Var x ->

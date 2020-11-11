@@ -6,9 +6,11 @@ SOME EXAMPLES OF MINI LANG
 #EX1.
 (* (fun (x: int, y: int) => (x * x) + (y * y)). *)
 
-Fn ([("x", Int); ("y", Int)],
 
-      Primop (Plus,
+
+    Fn ([("x", Int); ("y", Int)],
+
+           Primop (Plus,
       
               [Primop (Times, [Var "x"; Var "x"]);
               
@@ -23,6 +25,6 @@ Fn ([("x", Int); ("y", Int)],
 #EX2.
 (* let f = (fun (x: int, y: int) => (x * x) + (y * y)) in  f (3, 4). *)
 
- Let ("f", ex1, Apply (Var "f", [I 3; I 4]))
+      Let ("f", ex1, Apply (Var "f", [I 3; I 4]))
 
 

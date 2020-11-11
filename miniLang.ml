@@ -5,7 +5,7 @@ type tp =
   | Int
   | Bool
 
-(* Used for variables, aka "identifiers" *)
+(* define name for variables/identifiers *)
 type name = string
 
 (* define the primitive operations *)
@@ -17,7 +17,7 @@ type exp =
   | B of bool                         (* true | false *)
   | If of exp * exp * exp             (* if e then e1 else e2 *)
   | Primop of primop * exp list       (* e1 <op> e2  or <op> e *)
-  | Fn of ((name * tp) list * exp)    (* fn (x_1: t_1, ..., x_n: t_n) => e *)
+  | Fn of ((name * tp) list * exp)    (* fn (x1: t1, ..., xn: tn) => e *)
   | Rec of (name * tp * exp)          (* rec (f: t) => e *)
   | Let of (name * exp * exp)         (* let x = e1 in e2 end *)
   | Apply of exp * (exp list)         (* e (e_1, e_2, ..., e_n) *)
@@ -27,121 +27,128 @@ type exp =
 
 (************************************************** unused vars ************************************************)
 
-
-(* delete *)
+(* delete xs from l 
+        delete [1;2] [1;2;3] ==> [3] *)
 let rec delete xs l =
-  List.filter (fun x -> not (List.mem x xs)) l (* Deletes every occurence of the elements of xs from l.*)
-
-(* free_variables *)
-      (* free_variables e = list of names occurring free in e
+  List.filter (fun x -> not (List.mem x xs)) l 
+  
+  
+  
+(* free_variables 
+       free_variables e = list of names occurring free in e
        Invariant: every name occurs at most once. *)
 let rec free_variables = 
+  (* union [1;2] [2;3] => [1;2;3] *)
   let union l1 l2 =
     let l1' = List.filter (fun x -> not (List.mem x l2)) l1 in
     l1' @ l2
-    (* Taking unions of lists.  If the lists are in fact sets (all elements are unique), then the result will also be a set.
-  *)
+    
   in
+  (* taking all unions of a list of all free variables*)
   let union_fvs es =
     List.fold_left (fun acc exp -> union acc (free_variables exp)) [] es
-  in
+ 
+ 
+ in
   function
-  | Var y -> [y]
-  | I _ | B _ -> []
-  | If(e, e1, e2) -> union_fvs [e; e1; e2]
-  | Primop (po, args) -> union_fvs args
-  | Fn (xs, e) ->
-      let xs = List.map fst xs in
-      delete xs (free_variables e)
-  | Rec (x, t, e) ->
+  | Var y -> [y]                                  (* fv (x) = [x]                                      *)
+  | I _ | B _ -> []                               (* fv (1) = []; fv (true) = []                       *)
+  | If(e, e1, e2) -> union_fvs [e; e1; e2]        (* fv (if(e)then(e1)else(e2))= fv (union[e;e1;e2])   *)
+  | Primop (po, args) -> union_fvs args           (* fv (a1+a2) = fv (union [a1;a2] )                  *) 
+  | Fn (xs, e) ->                                 (* fv (fun (a:tp1, b:tp2) => e) =                    *)                                   
+      let xs = List.map fst xs in                 (*         xs=[a;b] in                               *)
+      delete xs (free_variables e)                (*          delete [a,b] from fv(e)                  *)
+  | Rec (x, t, e) ->                              (* fv (rec(x:tp)=>e) = delete [x] from fv(e)         *)
       delete [x] (free_variables e)
-  | Let (x, e1, e2) ->
-      let e1_vars = free_variables e1 in
+  | Let (x, e1, e2) ->                            (* fv (let x=e1 in e2) =                             *)
+      let e1_vars = free_variables e1 in          (*      union( fv(e1), fv(e2)\[x] )                  *)
       let e2_vars = delete [x] (free_variables e2) in
       union e1_vars e2_vars
-  | Apply (e, es) -> union_fvs (e :: es)
+  | Apply (e, es) -> union_fvs (e :: es)          (* fv (apply e (e1,e2)) = union_fv([e;e1;e2])        *)
 
 
 (* unused vars*)
 let rec unused_vars =
   function
-  | Var _ | I _ | B _ -> []
-  | If (e, e1, e2) -> unused_vars e @ unused_vars e1 @ unused_vars e2
-  | Primop (_, args) ->
+  | Var _ | I _ | B _ -> []                                               (*  no unusedvars                              *)
+  | If (e, e1, e2) -> unused_vars e @ unused_vars e1 @ unused_vars e2     (* unused(e)::unused(e1)::unused(e2)           *)
+  | Primop (_, args) ->                                                   (* unused(+,(a,b)) = unused(a)::unused(b)      *)
       List.fold_left (fun acc exp -> acc @ unused_vars exp) [] args
-  | Let (x, e1, e2) ->
-      let unused = unused_vars e1 @ unused_vars e2 in
-      if List.mem x (free_variables e2) then
-        unused
+  | Let (x, e1, e2) ->                                                    (* unused (let x=e1 in e2) =                   *)
+      let unused = unused_vars e1 @ unused_vars e2 in                     (*      if x in fv(e2)                         *)
+      if List.mem x (free_variables e2) then                              (*           => unused(e1)@unused(e2)          *)
+        unused                                                            (*      else => x::unused(e1)@unused(e2)       *)
       else
         x :: unused
 
-  | Rec (x, _, e) -> 
-      if List.mem x (free_variables e) then [] @ unused_vars e
-      else [x] @ unused_vars e
+  | Rec (x, _, e) ->                                                      (* unused(rec(x:tp)=>e) =                      *)
+      if List.mem x (free_variables e) then [] @ unused_vars e            (*      if x in fv(e)                          *)
+          else [x] @ unused_vars e                                        (*            => unused(e)                     *)
+                                                                          (*      else  => x::unused(e)                  *)
   
   
   
-  | Fn (xs, e) -> 
-      (let (namelst,tplst) = List.split (xs) in
+  | Fn (xs, e) ->                                                         (* unused (fun [a:tp1;b:tp2]=>e) =                     *)
+      (let (namelst,tplst) = List.split (xs) in                           (*      unused(e)@(fv(e)/[a;b])                        *)
        unused_vars e @ delete (free_variables e) namelst 
       ) 
 
-  | Apply (e, es) -> 
-      (unused_vars e) @ List.fold_left (fun b a -> unused_vars a @ b) [] es
+  | Apply (e, es) ->                                                          (* unused (apply (e,[e1;e2;e3])) =             *)
+      (unused_vars e) @ List.fold_left (fun b a -> unused_vars a @ b) [] es   (*      unused(e) @ unused(e1@e2@e3)           *)
                   
       
       
       
 (************************************************** subst ************************************************)
-type subst = exp * name
+type subst = exp * name     
 
+(* substitute variables into expressions *)
 let rec subst ((e', x) as s) exp =
+
   match exp with
-  | Var y ->
+  | Var y ->                          (* subst(e',x) (x) => (e') *)
       if x = y then e'
       else Var y
-  | I n -> I n
+  | I n -> I n                         (* subst(e',x) (int | bool) => (int | bool) *)
   | B b -> B b
-  | Primop (po, args) -> Primop (po, List.map (subst s) args)
-  | If (e, e1, e2) ->
+  | Primop (po, args) -> Primop (po, List.map (subst s) args)   (* subst(e',x) (x+y)) => (subst(s)(x) + subst(s)(y)) *)
+  | If (e, e1, e2) ->                                           (* if (subst(s)(e), then subst(s)(e1), else subst(s)(e2)  *)
       If (subst s e, subst s e1, subst s e2)
-  | Let (y, e1, e2) ->
-      let e1' = subst s e1 in
+  | Let (y, e1, e2) ->                                  (*  subst (e',x)(let x = e1 in e2)          *)
+      let e1' = subst s e1 in                           (*      => let e'=e1 in e2                  *)
       if y = x then
         Let (y, e1', e2)
-      else
-        let (y, e2) =
-          if List.mem y (free_variables e') then
-            rename y e2
-          else
+      else                                              (*  if y is in fv(e')                           *)
+        let (y, e2) =                                   (*    then (y,e2)=(rename y e2)                 *)
+            rename y e2                                 (*  else keep the old variable name             *)
+          else                                          (*     => let y = e1' in subst(s)(e2)           *)
             (y, e2)
         in
         Let (y, e1', subst s e2)
 
           
-  | Rec (y, t, e) -> 
-      if x = y then exp
-      else
-        let (y',exp') =
-          if List.mem y (free_variables e')
+  | Rec (y, t, e) ->                                    (*   subst(e',x) (rec(x:tp)=>e)  => exp            *)
+      if x = y then exp                                 (*   subst(e',x) (rec(y:tp)=>e)  =>                *)
+      else                                              (*       if y in fv(e')  then rename(y,exp)        *)
+        let (y',exp') =                                 (*       else keep old var name                    *)
+          if List.mem y (free_variables e')             (*       rec(y:tp)=> subst(s)(e)                   *)
           then rename y e
           else (y,e)
         in Rec (y',t, subst s exp') 
   
 
-  | Fn (xs, e) -> 
-      let namelst = (List.map (fun (n,_) -> n) xs) in
+  | Fn (xs, e) ->                                                                         (*  subst(e',x)(fun [a:tp1,b:tp2,c:tp3] e)    *)
+      let namelst = (List.map (fun (n,_) -> n) xs) in                                     (*      if x in [a;b;c] => exp                *)
       
       if List.mem x namelst then exp 
         
-      else 
-        let filtername = List.filter (fun x -> (List.mem x (free_variables e'))) namelst  in 
-        let (name',e') = rename_all filtername e in
+      else                                                                                   (*      else                                           *)
+        let filtername = List.filter (fun x -> (List.mem x (free_variables e'))) namelst  in (*        rename all ele in [a;b;c] that is in fv(e')  *)
+        let (name',e') = rename_all filtername e in                                          (*        l=[(a,a');(b,b');(c,c')]                     *)
         let l = List.combine filtername name' in
         let newl =
-          
-          let rec nlst xs l acc =
+                                                                                              (*        loop through xs , newl=xs after renaming     *)                                                                             
+          let rec nlst xs l acc =                                                             (*         fun(newl, subst(s)(e'))                     *)
             match (xs,l) with
             |(lst,[]) -> (acc @ lst)
             |(((h,e)::tl),((x,x')::xs)) ->
@@ -155,14 +162,14 @@ let rec subst ((e', x) as s) exp =
         
       
   
-  | Apply (e, es) -> 
+  | Apply (e, es) ->                                        (* subst (Apply(e,[e1;e2])) =  Apply (subst(s)(e), [subst(s)(e1);subst(s)(e2)]*)
       Apply (subst s e, List.map (subst s) es) 
 
-and rename x e =
+and rename x e =                      (* rename x in expression e into x',e' *)
   let x' = freshVar x in
   (x', subst (Var x', x) e)
 
-and rename_all names exp =
+and rename_all names exp =            (* rename all x in its expression in a list *)
   List.fold_right
     (fun name (names, exp) -> 
        let (name', exp') = rename name exp in

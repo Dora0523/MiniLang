@@ -3,6 +3,7 @@ Create a mini programming language using Ocaml
 explored concepts such as free variables, substitution, evaluation, type checking, and type inference.
 
 SOME EXAMPLES OF MINI LANG
+
 #EX1.
 (* (fun (x: int, y: int) => (x * x) + (y * y)). *)
 

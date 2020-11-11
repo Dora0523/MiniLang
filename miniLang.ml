@@ -93,8 +93,8 @@ let rec unused_vars =
        unused_vars e @ delete (free_variables e) namelst 
       ) 
 
-  | Apply (e, es) ->                                                          (* unused (apply (e,[e1;e2;e3])) =             *)
-      (unused_vars e) @ List.fold_left (fun b a -> unused_vars a @ b) [] es   (*      unused(e) @ unused(e1@e2@e3)           *)
+  | Apply (e, es) ->                                                          (* unused (apply (f,[e1;e2;e3])) =             *)
+      (unused_vars e) @ List.fold_left (fun b a -> unused_vars a @ b) [] es   (*      unused(f) @ unused(e1@e2@e3)           *)
                   
       
       
@@ -162,7 +162,7 @@ let rec subst ((e', x) as s) exp =
         
       
   
-  | Apply (e, es) ->                                        (* subst (Apply(e,[e1;e2])) =  Apply (subst(s)(e), [subst(s)(e1);subst(s)(e2)]*)
+  | Apply (e, es) ->                                        (* subst (Apply(f,[e1;e2])) =  Apply (subst(s)(f), [subst(s)(e1);subst(s)(e2)]*)
       Apply (subst s e, List.map (subst s) es) 
 
 and rename x e =                      (* rename x in expression e into x',e' *)
@@ -185,11 +185,11 @@ let subst_list subs exp =
 (************************************************** eval ************************************************)
 (* Runtime errors that may be raised by eval. *)
 type runtime_error =
-  | Free_variable of name
-  | Bad_primop_args
-  | If_non_true_false
-  | Arity_mismatch
-  | Apply_non_fn
+  | Free_variable of name   (*free var*)
+  | Bad_primop_args         (*primop does not match*)
+  | If_non_true_false       (* if condition not boolean*)
+  | Arity_mismatch          (* applied list != function input requirements*)
+  | Apply_non_fn            (* Apply(e,es) not a function *)
 exception Stuck of runtime_error
 
 (* Evaluates a primitive operation *)
@@ -208,27 +208,19 @@ let eval_op op exps =
 let rec eval exp =
   match exp with
   (* Values evaluate to themselves *)
-  | I _ -> exp
+  | I _ -> exp          (* evaluation of int/boolean/function should be itself*)
   | B _ -> exp
   | Fn _ -> exp
-
-  (* This evaluator is _not_ environment-based. Variables should never
-     appear during evaluation since they should be substituted away when
-     eliminating binding constructs, e.g. function applications and lets.
-     Therefore, if we encounter a variable, we raise an error.
-*)
-  | Var x -> raise (Stuck (Free_variable x))
-
-  (* Primitive operations: +, -, *, <, = *)
-  | Primop (po, args) ->
+  | Var x -> raise (Stuck (Free_variable x))  (*there should be no variable left since all vars should be subst during evaluation *)
+  | Primop (po, args) ->                      (* Primitive operations: +, -, *, <, = *)
       let args = List.map eval args in
       begin
-        match eval_op po args with
+        match eval_op po args with            (* evaluate by matching primops, raise error if no match*)
         | None -> raise (Stuck Bad_primop_args)
         | Some v -> v
       end
 
-  | If (e, e1, e2) ->
+  | If (e, e1, e2) ->                         (* evaluate by condition, raise error if e not boolean *)
       begin
         match eval e with
         | B true -> eval e1
@@ -236,15 +228,15 @@ let rec eval exp =
         | _ -> raise (Stuck If_non_true_false)
       end
 
-  | Let (x, e1, e2) ->
+  | Let (x, e1, e2) ->                (* evaluate e1 first, then subst(e1,x) to e2 *)
       let e1 = eval e1 in
       eval (subst (e1, x) e2)
 
-  | Rec (f, _, e) -> 
+  | Rec (f, _, e) ->                  (* subst f by exp, then evaluate *)
       eval (subst (exp,f) e)
 
-  | Apply (e, es) -> 
-      match eval e with
+  | Apply (e, es) ->                  (* e has to be a function, else, raise error                   *)
+      match eval e with               (* if applied list es != function required length, raise error *)
       |Fn(xs,exp) ->
           if List.length es != List.length xs then raise (Stuck Arity_mismatch)
           else
@@ -259,15 +251,13 @@ type context = (name * tp) list
 let empty = []
 
 
-(* Looks up the topmost x in ctx and returns its corresponding type.
-   If the variable x cannot be located in ctx, raises Not_found.
-*)
-let lookup (x: name) (ctx: context) = List.assoc x ctx
+(* Looks up the topmost x in ctx and returns its corresponding type.*)
+let lookup (x: name) (ctx: context) = List.assoc x ctx  
 
 
-(* Adds a new type ascription to a context. *)
+(* Adds a new type ascription (x,tau) to a context. *)
 let extend ctx (x, tau) = (x, tau) :: ctx
-(* Adds multiple new type ascriptions to a context. *)
+(* Adds multiple new type ascriptions (l,ctx) to a context. *)
 let extend_list (ctx: context) (l: (name * tp) list) =
   List.fold_left extend ctx l
 
@@ -276,7 +266,7 @@ let extend_list (ctx: context) (l: (name * tp) list) =
 (* Type errors that may be raised by infer *)
 type type_error =
   | Free_variable of name
-  | Apply_non_arrow of tp (* expected an arrow type, but instead found... *)
+  | Apply_non_arrow of tp (* expected an arrow type, but instead found other tp *)
   | Arity_mismatch
   | Type_mismatch of tp * tp (* (expected type, actual type) *)
 
@@ -292,7 +282,8 @@ let type_mismatch expected_type inferred_type =
 (* Computes the type of a primitive operation.
    The result is a tuple representing the domain and range of the primop.
  *)
-let primopType (p: primop): tp list * tp = match p with
+let primopType (p: primop): tp list * tp = 
+match p with
   | Equals   -> ([Int; Int], Bool)
   | LessThan -> ([Int; Int], Bool)
   | Plus     -> ([Int; Int], Int)
@@ -308,17 +299,17 @@ let rec infer ctx e =
   match e with
   | Var x ->
       begin
-        try lookup x ctx
+        try lookup x ctx                                           (* lookup var x, raise error if x is free *)
         with Not_found -> raise (TypeError (Free_variable x))
       end
   | I _ -> Int
   | B _ -> Bool
-
-  | Primop (po, exps) ->
+  
+  | Primop (po, exps) ->                             (* recursively check domain & infer context. infer = range if exps and domains are all empty*)
       let (domain, range) = primopType po in
       check ctx exps domain range
 
-  | If (e, e1, e2) ->
+  | If (e, e1, e2) ->                           (*  e1 and e2 must have same type inference *)
       begin
         match infer ctx e with
         | Bool ->
@@ -329,21 +320,21 @@ let rec infer ctx e =
         | t -> type_mismatch Bool t
       end
 
-  | Let (x, e1, e2) ->
+  | Let (x, e1, e2) ->                        (* infer e1 first, extend context, infer whole exp *)
       let t1 = infer ctx e1 in
       infer (extend ctx (x, t1)) e2
 
-  | Rec (f(*name*), t(*type*), e(*exp*)) -> 
+  | Rec (f(*name*), t(*type*), e(*exp*)) ->   (* infered function type == exp *)
       let et = infer (extend ctx (f,t)) e in
-      if et<> t then raise (TypeError (type_mismatch t et));
+      if et<>t then raise (TypeError (type_mismatch t et));
       et
 
   | Fn (xs, e) -> 
       let (nl,tl) = List.split xs in 
-      let t = infer (extend_list (ctx) (xs)) e
+      let t = infer (extend_list (ctx) (xs)) e  (* returns Arrow: typelist (tl) --> infered exp (t) *)
       in Arrow (tl,t)
   
-  | Apply (e, es) -> 
+  | Apply (e, es) ->                            (* type(tv) == type(es) *)
       begin match infer ctx e with
         |Arrow (tv,exp) -> 
             let l1 = tv in
